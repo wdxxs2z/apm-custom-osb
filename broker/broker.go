@@ -5,6 +5,7 @@ import (
 	"log"
 	"fmt"
 	"context"
+	"strconv"
 	"strings"
 	"net/http"
 	"encoding/json"
@@ -103,7 +104,7 @@ func (sb *SkyWalkingBroker)Provision(context context.Context, instanceID string,
 	sb.logger.Debug("provision", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, err := db.Exist(instanceID, sb.logger, sb.config)
+	exist, err := db.Exist(instanceID + "/details", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
@@ -125,14 +126,14 @@ func (sb *SkyWalkingBroker)Deprovision(context context.Context, instanceID strin
 	sb.logger.Debug("deprovision", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, existErr := db.Exist(instanceID, sb.logger, sb.config)
+	exist, existErr := db.Exist(instanceID + "/details", sb.logger, sb.config)
 	if existErr != nil {
 		return brokerapi.DeprovisionServiceSpec{}, existErr
 	}
 	if !exist {
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
 	}
-	err := db.DeleteKey(instanceID, sb.logger, sb.config)
+	err := db.DeleteKey(instanceID + "/", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
@@ -147,7 +148,15 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 	bindParameters := BindParameters{}
 	credentials := make(map[string]interface{})
 
-	exist, err := db.Exist(instanceID + "/bindings/" + bindingID, sb.logger, sb.config)
+	instanceExist, instanceExistErr := db.Exist(instanceID + "/details", sb.logger, sb.config)
+	if instanceExistErr != nil {
+		return brokerapi.Binding{}, instanceExistErr
+	}
+	if !instanceExist {
+		return brokerapi.Binding{}, brokerapi.ErrInstanceDoesNotExist
+	}
+
+	exist, err := db.Exist(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.Binding{}, err
 	}
@@ -171,24 +180,24 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 		}
 		for param, value := range bindParameters {
 			if strings.EqualFold(param, "span-limit-per-segment"){
-				if _,b:= value.(int); b{
-					credentials[param] = value
-				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set span-limit-per-segment parameter,must be int")
+				slps, err := strconv.Atoi(value.(string))
+				if err != nil {
+					return brokerapi.Binding{}, fmt.Errorf("Error parameter %s set,error is: %s", param, err)
 				}
+				credentials[param] = slps
 			}
 			if strings.EqualFold(param, "ignore-suffix") {
 				if _,b := value.(string); b {
 					credentials[param] = value
 				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set ignore-suffix parameter,must be string,such as:'.html'")
+					return brokerapi.Binding{}, fmt.Errorf("Error set %s parameter,must be string,such as:'.html'", param)
 				}
 			}
 			if strings.EqualFold(param, "is-open-debugging-class") {
 				if _, b:= value.(bool); b {
 					credentials[param] = value
 				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set is-open-debugging-class,must be bool")
+					return brokerapi.Binding{}, fmt.Errorf("Error set %s,must be bool", param)
 				}
 			}
 			if strings.EqualFold(param, "logging-level") {
@@ -196,10 +205,10 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 					if strings.Contains(value.(string), "DEBUG") || strings.Contains(value.(string), "INFO") || strings.Contains(value.(string), "ERROR") || strings.Contains(value.(string), "WARNING") {
 						credentials[param] = value
 					}else {
-						return brokerapi.Binding{}, fmt.Errorf("Error set logging-level, must set DEBUG,INFO,ERROR,WARNING")
+						return brokerapi.Binding{}, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING", param)
 					}
 				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set logging-level, must set DEBUG,INFO,ERROR,WARNING")
+					return brokerapi.Binding{}, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING string", param)
 				}
 			}
 		}
@@ -222,14 +231,14 @@ func (sb *SkyWalkingBroker)Unbind(context context.Context, instanceID, bindingID
 	sb.logger.Debug("unbind", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, existErr := db.Exist(instanceID + "/bindings/" + bindingID, sb.logger, sb.config)
+	exist, existErr := db.Exist(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if existErr != nil {
 		return existErr
 	}
 	if !exist {
 		return brokerapi.ErrBindingDoesNotExist
 	}
-	err := db.DeleteKey(instanceID + "/bindings/" + bindingID, sb.logger, sb.config)
+	err := db.DeleteKey(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if err != nil {
 		return err
 	}

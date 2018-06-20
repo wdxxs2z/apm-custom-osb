@@ -7,9 +7,9 @@ service_config:
   allow_user_bind_parameters: true
   db:
     endpoints:
-    - 127.0.0.1:4001
+    - 127.0.0.1:2379
     dial_timeout: 30
-    db_name: skywalking
+    db_name: /skywalking
   skywalk_config:
     servers:
     - 127.0.0.1:9090

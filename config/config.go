@@ -59,5 +59,5 @@ type Cost struct {
 }
 
 type SkyWalking struct {
-	Servers				[]string		`yaml:"servers"`
+	Servers			[]string		`yaml:"servers"`
 }

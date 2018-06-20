@@ -41,6 +41,7 @@ func Exist(storeKey string, logger lager.Logger, config config.Config) (bool, er
 	}
 	cancel()
 	defer client.Close()
+	fmt.Println(res.Count)
 	if res.Count < 1 {
 		return false, nil
 	}
@@ -128,7 +129,7 @@ func DeleteKey(storeKey string, logger lager.Logger, config config.Config) error
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.DatabaseConfig.DialTimeout * time.Second)
-	_, err = client.Delete(ctx, requestKey)
+	_, err = client.Delete(ctx, requestKey, etcd.OpOption(etcd.WithPrefix()))
 	cancel()
 	defer client.Close()
 	if err != nil {
