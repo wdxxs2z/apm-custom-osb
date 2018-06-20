@@ -5,7 +5,6 @@ import (
 	"log"
 	"fmt"
 	"context"
-	"strconv"
 	"strings"
 	"net/http"
 	"encoding/json"
@@ -161,6 +160,24 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 		return brokerapi.Binding{}, err
 	}
 	if exist {
+		if sb.allowUserBindParameters && len(details.GetRawParameters()) >0 {
+			if err := json.Unmarshal(details.GetRawParameters(), &bindParameters); err != nil {
+				return brokerapi.Binding{}, err
+			}
+			parameters, err := validateParameter(bindParameters)
+			if err != nil {
+				return brokerapi.Binding{}, err
+			}
+			parameters["servers"] = sb.config.SkyWalkingConfig.Servers
+			data, jsonErr := json.Marshal(parameters)
+			if jsonErr != nil {
+				return brokerapi.Binding{}, jsonErr
+			}
+			db.UpdateData(instanceID + "/bindings/" + bindingID + "/credentials", string(data[:]), sb.logger, sb.config)
+			return brokerapi.Binding{
+				Credentials:		parameters,
+			}, nil
+		}
 		data, err := db.GetData(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 		if err != nil {
 			return brokerapi.Binding{}, err
@@ -170,50 +187,21 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 		}
 		return brokerapi.Binding{
 			Credentials:		bindParameters,
-		}, brokerapi.ErrBindingAlreadyExists
+		}, nil
 	}
 
-	services := sb.config.SkyWalkingConfig.Servers
+	servers := sb.config.SkyWalkingConfig.Servers
 	if sb.allowUserBindParameters && len(details.GetRawParameters()) >0 {
 		if err := json.Unmarshal(details.GetRawParameters(), &bindParameters); err != nil {
 			return brokerapi.Binding{}, err
 		}
-		for param, value := range bindParameters {
-			if strings.EqualFold(param, "span-limit-per-segment"){
-				slps, err := strconv.Atoi(value.(string))
-				if err != nil {
-					return brokerapi.Binding{}, fmt.Errorf("Error parameter %s set,error is: %s", param, err)
-				}
-				credentials[param] = slps
-			}
-			if strings.EqualFold(param, "ignore-suffix") {
-				if _,b := value.(string); b {
-					credentials[param] = value
-				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set %s parameter,must be string,such as:'.html'", param)
-				}
-			}
-			if strings.EqualFold(param, "is-open-debugging-class") {
-				if _, b:= value.(bool); b {
-					credentials[param] = value
-				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set %s,must be bool", param)
-				}
-			}
-			if strings.EqualFold(param, "logging-level") {
-				if _, b := value.(string); b {
-					if strings.Contains(value.(string), "DEBUG") || strings.Contains(value.(string), "INFO") || strings.Contains(value.(string), "ERROR") || strings.Contains(value.(string), "WARNING") {
-						credentials[param] = value
-					}else {
-						return brokerapi.Binding{}, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING", param)
-					}
-				}else {
-					return brokerapi.Binding{}, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING string", param)
-				}
-			}
+		parameters, err := validateParameter(bindParameters)
+		if err != nil {
+			return brokerapi.Binding{}, err
 		}
+		credentials = parameters
 	}
-	credentials["services"] = services
+	credentials["servers"] = servers
 	data, jsonErr := json.Marshal(credentials)
 	if jsonErr != nil {
 		return brokerapi.Binding{}, jsonErr
@@ -289,4 +277,43 @@ func authHandler(config config.Config, noAuthRequired map[*mux.Route]bool) mux.M
 			handler.ServeHTTP(w, r)
 		})
 	}
+}
+
+func validateParameter(parameters map[string]interface{}) (map[string]interface{}, error) {
+	credentials := make(map[string]interface{})
+	for param, value := range parameters {
+		if strings.EqualFold(param, "span-limit-per-segment"){
+			if _,b := value.(float64); b {
+				credentials[param] = value
+			}else {
+				return nil, fmt.Errorf("Error parameter %s set,error is: %s", param, "not int type")
+			}
+		}
+		if strings.EqualFold(param, "ignore-suffix") {
+			if _,b := value.(string); b {
+				credentials[param] = value
+			}else {
+				return nil, fmt.Errorf("Error set %s parameter,must be string,such as:'.html'", param)
+			}
+		}
+		if strings.EqualFold(param, "is-open-debugging-class") {
+			if _, b:= value.(bool); b {
+				credentials[param] = value
+			}else {
+				return nil, fmt.Errorf("Error set %s,must be bool", param)
+			}
+		}
+		if strings.EqualFold(param, "logging-level") {
+			if _, b := value.(string); b {
+				if strings.Contains(value.(string), "DEBUG") || strings.Contains(value.(string), "INFO") || strings.Contains(value.(string), "ERROR") || strings.Contains(value.(string), "WARNING") {
+					credentials[param] = value
+				}else {
+					return nil, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING", param)
+				}
+			}else {
+				return nil, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING string", param)
+			}
+		}
+	}
+	return credentials, nil
 }
