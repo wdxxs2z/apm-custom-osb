@@ -5,7 +5,7 @@ import (
 	"time"
 	"golang.org/x/net/context"
 	"code.cloudfoundry.org/lager"
-	"github.com/wdxxs2z/skywalking-osb/config"
+	"github.com/wdxxs2z/apm-custom-osb/config"
 	etcd "github.com/coreos/etcd/clientv3"
 )
 

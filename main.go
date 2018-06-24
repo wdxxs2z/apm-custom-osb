@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/wdxxs2z/skywalking-osb/broker"
+	"github.com/wdxxs2z/apm-custom-osb/broker"
 	"code.cloudfoundry.org/lager"
 	"flag"
 	"strings"
@@ -22,8 +22,8 @@ var (
 )
 
 func init() {
-	flag.StringVar(&configpath, "config", "", "The helmi config path")
-	flag.StringVar(&port, "port", "8080", "Listen port")
+	flag.StringVar(&configpath, "config", "", "apm service broker config path")
+	flag.StringVar(&port, "port", "8080", "listen port")
 }
 
 func buildLogger(logLevel string) lager.Logger {
@@ -32,7 +32,7 @@ func buildLogger(logLevel string) lager.Logger {
 		log.Fatal("Invalid log level: ", logLevel)
 	}
 
-	logger := lager.NewLogger("skywalking-service-broker")
+	logger := lager.NewLogger("apm-service-broker")
 	logger.RegisterSink(lager.NewWriterSink(os.Stdout, laggerLogLevel))
 
 	return logger

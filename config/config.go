@@ -8,7 +8,6 @@ type Config struct {
 	AllowUserBindParameters      bool               `yaml:"allow_user_bind_parameters"`
 	DatabaseConfig               DB                 `yaml:"db"`
 	Services                     []Service 		`yaml:"services"`
-	SkyWalkingConfig	     SkyWalking         `yaml:"skywalk_config"`
 }
 
 type DB struct {
@@ -46,6 +45,7 @@ type Plan struct {
 	Free        		*bool 			`yaml:"free"`
 	Bindable    		*bool			`yaml:"bindable"`
 	Metadata    		PlanMetadata		`yaml:"metadata"`
+	Parameters              map[string]interface{} `yaml:"parameters"`
 }
 
 type PlanMetadata struct {
@@ -56,8 +56,4 @@ type PlanMetadata struct {
 type Cost struct {
 	Amount    		map[string]float64	`yaml:"amount"`
 	Unit      		string			`yaml:"unit"`
-}
-
-type SkyWalking struct {
-	Servers			[]string		`yaml:"servers"`
 }

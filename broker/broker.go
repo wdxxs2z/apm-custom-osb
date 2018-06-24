@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"context"
 	"strings"
+	"reflect"
 	"net/http"
 	"encoding/json"
 
@@ -14,27 +15,26 @@ import (
 	"code.cloudfoundry.org/lager"
 	"github.com/pivotal-cf/brokerapi"
 
-	"github.com/wdxxs2z/skywalking-osb/config"
-	"github.com/wdxxs2z/skywalking-osb/db"
+	"github.com/wdxxs2z/apm-custom-osb/config"
+	"github.com/wdxxs2z/apm-custom-osb/db"
 )
 
 type ProvisionParameters map[string]string
 
 type BindParameters map[string]interface{}
 
-type SkyWalkingBroker struct {
+type APMSserviceBroker struct {
 	allowUserProvisionParameters 	bool
 	allowUserUpdateParameters    	bool
 	allowUserBindParameters      	bool
 	logger                  	lager.Logger
 	brokerRouter			*mux.Router
 	config                          config.Config
-	skbrokerRouter			*mux.Router
 }
 
-func New(config config.Config, logger lager.Logger) *SkyWalkingBroker{
+func New(config config.Config, logger lager.Logger) *APMSserviceBroker{
 	brokerRouter := mux.NewRouter()
-	broker := &SkyWalkingBroker{
+	broker := &APMSserviceBroker{
 		allowUserBindParameters:	config.AllowUserBindParameters,
 		allowUserProvisionParameters:   config.AllowUserProvisionParameters,
 		allowUserUpdateParameters:      config.AllowUserUpdateParameters,
@@ -57,53 +57,51 @@ func New(config config.Config, logger lager.Logger) *SkyWalkingBroker{
 	return broker
 }
 
-func (sb *SkyWalkingBroker)Run(address string)  {
-	log.Println("Skywalking APM Service Broker started on port " + strings.TrimPrefix(address, ":"))
+func (sb *APMSserviceBroker)Run(address string)  {
+	log.Println("APM Service Broker started on port " + strings.TrimPrefix(address, ":"))
 	log.Fatal(http.ListenAndServe(address, sb.brokerRouter))
 }
 
-func (sb *SkyWalkingBroker)Services(context context.Context) ([]brokerapi.Service, error){
+func (sb *APMSserviceBroker)Services(context context.Context) ([]brokerapi.Service, error){
 	sb.logger.Debug("fetch-service-catalog",lager.Data{})
 
-	skywalkingService := sb.config.Services[0]
-	return []brokerapi.Service{
-		brokerapi.Service{
-		ID:			skywalkingService.Id,
-		Name:           	skywalkingService.Name,
-		Description:    	skywalkingService.Description,
-		Bindable:       	skywalkingService.Bindable,
-		Tags:           	skywalkingService.Tags,
-		PlanUpdatable:  	skywalkingService.PlanUpdateable,
-		Plans:          	[]brokerapi.ServicePlan{
-			brokerapi.ServicePlan{
-				ID:		skywalkingService.Plans[0].Id,
-				Name:           skywalkingService.Plans[0].Name,
-				Description:    skywalkingService.Plans[0].Description,
-				Free:           skywalkingService.Plans[0].Free,
-				Bindable:       skywalkingService.Plans[0].Bindable,
-				Metadata:       &brokerapi.ServicePlanMetadata{
-					DisplayName:		skywalkingService.Plans[0].Description,
-					Bullets: 		skywalkingService.Plans[0].Metadata.Bullets,
-				},
+	apmServices := sb.config.Services
+
+	services := make([]brokerapi.Service,len(apmServices))
+
+	for _,apmService := range apmServices {
+
+		services = append(services, brokerapi.Service{
+			ID:			apmService.Id,
+			Name:           	apmService.Name,
+			Description:    	apmService.Description,
+			Bindable:       	apmService.Bindable,
+			Tags:           	apmService.Tags,
+			PlanUpdatable:  	apmService.PlanUpdateable,
+			Metadata:       	&brokerapi.ServiceMetadata{
+				DisplayName:		apmService.Metadata.DisplayName,
+				ImageUrl:               apmService.Metadata.ImageUrl,
+				LongDescription:	apmService.Metadata.LongDescription,
+				ProviderDisplayName:    apmService.Metadata.ProviderDisplayName,
+				DocumentationUrl:	apmService.Metadata.DocumentationUrl,
+				SupportUrl:		apmService.Metadata.SupportUrl,
 			},
-		},
-		Metadata:       	&brokerapi.ServiceMetadata{
-			DisplayName:		skywalkingService.Metadata.DisplayName,
-			ImageUrl:               skywalkingService.Metadata.ImageUrl,
-			LongDescription:	skywalkingService.Metadata.LongDescription,
-			ProviderDisplayName:    skywalkingService.Metadata.ProviderDisplayName,
-			DocumentationUrl:	skywalkingService.Metadata.DocumentationUrl,
-			SupportUrl:		skywalkingService.Metadata.SupportUrl,
-			},
-		},
-	}, nil
+			Plans:          	servicePlans(apmService.Plans),
+
+		})
+	}
+	return services,nil
 }
 
-func (sb *SkyWalkingBroker)Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (brokerapi.ProvisionedServiceSpec, error) {
+func (sb *APMSserviceBroker)Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (brokerapi.ProvisionedServiceSpec, error) {
 	sb.logger.Debug("provision", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, err := db.Exist(instanceID + "/details", sb.logger, sb.config)
+	service,_ := sb.GetService(details.ServiceID)
+	if service.Name != "" {
+		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
+	}
+	exist, err := db.Exist(service.Name + "/" +instanceID + "/details", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
@@ -114,32 +112,36 @@ func (sb *SkyWalkingBroker)Provision(context context.Context, instanceID string,
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
-	dbErr := db.CreateData(instanceID + "/details", string(data[:]), sb.logger, sb.config)
+	dbErr := db.CreateData(service.Name + "/" +instanceID + "/details", string(data[:]), sb.logger, sb.config)
 	if dbErr != nil {
 		return brokerapi.ProvisionedServiceSpec{}, dbErr
 	}
 	return brokerapi.ProvisionedServiceSpec{}, nil
 }
 
-func (sb *SkyWalkingBroker)Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (brokerapi.DeprovisionServiceSpec, error){
+func (sb *APMSserviceBroker)Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (brokerapi.DeprovisionServiceSpec, error){
 	sb.logger.Debug("deprovision", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, existErr := db.Exist(instanceID + "/details", sb.logger, sb.config)
+	service,_ := sb.GetService(details.ServiceID)
+	if service.Name != "" {
+		return brokerapi.DeprovisionServiceSpec{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
+	}
+	exist, existErr := db.Exist(service.Name + "/" + instanceID + "/details", sb.logger, sb.config)
 	if existErr != nil {
 		return brokerapi.DeprovisionServiceSpec{}, existErr
 	}
 	if !exist {
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
 	}
-	err := db.DeleteKey(instanceID + "/", sb.logger, sb.config)
+	err := db.DeleteKey(service.Name + "/" + instanceID + "/", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 	return brokerapi.DeprovisionServiceSpec{}, nil
 }
 
-func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID string, details brokerapi.BindDetails) (brokerapi.Binding, error){
+func (sb *APMSserviceBroker)Bind(context context.Context, instanceID, bindingID string, details brokerapi.BindDetails) (brokerapi.Binding, error){
 	sb.logger.Debug("bind", lager.Data{
 		"instance_id":        	instanceID,
 	})
@@ -147,7 +149,11 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 	bindParameters := BindParameters{}
 	credentials := make(map[string]interface{})
 
-	instanceExist, instanceExistErr := db.Exist(instanceID + "/details", sb.logger, sb.config)
+	service,_ := sb.GetService(details.ServiceID)
+	if service.Name != "" {
+		return brokerapi.Binding{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
+	}
+	instanceExist, instanceExistErr := db.Exist(service.Name + "/" + instanceID + "/details", sb.logger, sb.config)
 	if instanceExistErr != nil {
 		return brokerapi.Binding{}, instanceExistErr
 	}
@@ -155,7 +161,7 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 		return brokerapi.Binding{}, brokerapi.ErrInstanceDoesNotExist
 	}
 
-	exist, err := db.Exist(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
+	exist, err := db.Exist(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if err != nil {
 		return brokerapi.Binding{}, err
 	}
@@ -164,21 +170,20 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 			if err := json.Unmarshal(details.GetRawParameters(), &bindParameters); err != nil {
 				return brokerapi.Binding{}, err
 			}
-			parameters, err := validateParameter(bindParameters)
+			parameters, err := sb.ValidateParameter(details.ServiceID, details.PlanID, bindParameters)
 			if err != nil {
 				return brokerapi.Binding{}, err
 			}
-			parameters["servers"] = sb.config.SkyWalkingConfig.Servers
 			data, jsonErr := json.Marshal(parameters)
 			if jsonErr != nil {
 				return brokerapi.Binding{}, jsonErr
 			}
-			db.UpdateData(instanceID + "/bindings/" + bindingID + "/credentials", string(data[:]), sb.logger, sb.config)
+			db.UpdateData(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", string(data[:]), sb.logger, sb.config)
 			return brokerapi.Binding{
 				Credentials:		parameters,
 			}, nil
 		}
-		data, err := db.GetData(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
+		data, err := db.GetData(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 		if err != nil {
 			return brokerapi.Binding{}, err
 		}
@@ -190,24 +195,22 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 		}, nil
 	}
 
-	servers := sb.config.SkyWalkingConfig.Servers
 	if sb.allowUserBindParameters && len(details.GetRawParameters()) >0 {
 		if err := json.Unmarshal(details.GetRawParameters(), &bindParameters); err != nil {
 			return brokerapi.Binding{}, err
 		}
-		parameters, err := validateParameter(bindParameters)
+		parameters, err := sb.ValidateParameter(details.ServiceID, details.PlanID, bindParameters)
 		if err != nil {
 			return brokerapi.Binding{}, err
 		}
 		credentials = parameters
 	}
-	credentials["servers"] = servers
 	data, jsonErr := json.Marshal(credentials)
 	if jsonErr != nil {
 		return brokerapi.Binding{}, jsonErr
 	}
 
-	if err := db.CreateData(instanceID + "/bindings/" + bindingID + "/credentials", string(data[:]), sb.logger, sb.config); err != nil {
+	if err := db.CreateData(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", string(data[:]), sb.logger, sb.config); err != nil {
 		return brokerapi.Binding{}, err
 	}
 	return brokerapi.Binding{
@@ -215,32 +218,36 @@ func (sb *SkyWalkingBroker)Bind(context context.Context, instanceID, bindingID s
 	}, nil
 }
 
-func (sb *SkyWalkingBroker)Unbind(context context.Context, instanceID, bindingID string, details brokerapi.UnbindDetails) error {
+func (sb *APMSserviceBroker)Unbind(context context.Context, instanceID, bindingID string, details brokerapi.UnbindDetails) error {
 	sb.logger.Debug("unbind", lager.Data{
 		"instance_id":        	instanceID,
 	})
-	exist, existErr := db.Exist(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
+	service,_ := sb.GetService(details.ServiceID)
+	if service.Name != "" {
+		return fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
+	}
+	exist, existErr := db.Exist(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if existErr != nil {
 		return existErr
 	}
 	if !exist {
 		return brokerapi.ErrBindingDoesNotExist
 	}
-	err := db.DeleteKey(instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
+	err := db.DeleteKey(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (sb *SkyWalkingBroker)LastOperation(context context.Context, instanceID, operationData string) (brokerapi.LastOperation, error) {
+func (sb *APMSserviceBroker)LastOperation(context context.Context, instanceID, operationData string) (brokerapi.LastOperation, error) {
 	sb.logger.Debug("last-operation", lager.Data{
 		"instance_id":        	instanceID,
 	})
 	return brokerapi.LastOperation{}, nil
 }
 
-func (sb *SkyWalkingBroker)Update(context context.Context, instanceID string, details brokerapi.UpdateDetails, asyncAllowed bool) (brokerapi.UpdateServiceSpec, error) {
+func (sb *APMSserviceBroker)Update(context context.Context, instanceID string, details brokerapi.UpdateDetails, asyncAllowed bool) (brokerapi.UpdateServiceSpec, error) {
 	sb.logger.Debug("update", lager.Data{
 		"instance_id":        	instanceID,
 	})
@@ -279,41 +286,61 @@ func authHandler(config config.Config, noAuthRequired map[*mux.Route]bool) mux.M
 	}
 }
 
-func validateParameter(parameters map[string]interface{}) (map[string]interface{}, error) {
+func (sb *APMSserviceBroker)ValidateParameter(serviceId string, planId string, parameters map[string]interface{}) (map[string]interface{}, error) {
 	credentials := make(map[string]interface{})
-	for param, value := range parameters {
-		if strings.EqualFold(param, "span-limit-per-segment"){
-			if _,b := value.(float64); b {
-				credentials[param] = value
-			}else {
-				return nil, fmt.Errorf("Error parameter %s set,error is: %s", param, "not int type")
-			}
-		}
-		if strings.EqualFold(param, "ignore-suffix") {
-			if _,b := value.(string); b {
-				credentials[param] = value
-			}else {
-				return nil, fmt.Errorf("Error set %s parameter,must be string,such as:'.html'", param)
-			}
-		}
-		if strings.EqualFold(param, "is-open-debugging-class") {
-			if _, b:= value.(bool); b {
-				credentials[param] = value
-			}else {
-				return nil, fmt.Errorf("Error set %s,must be bool", param)
-			}
-		}
-		if strings.EqualFold(param, "logging-level") {
-			if _, b := value.(string); b {
-				if strings.Contains(value.(string), "DEBUG") || strings.Contains(value.(string), "INFO") || strings.Contains(value.(string), "ERROR") || strings.Contains(value.(string), "WARNING") {
-					credentials[param] = value
+	plan,_:= sb.GetPlan(serviceId, planId)
+	for pk,pv := range plan.Parameters {
+		for param, value := range parameters {
+			if strings.EqualFold(pk, param) {
+				if (reflect.TypeOf(pv) == reflect.TypeOf(value)) {
+					credentials[pk] = value
 				}else {
-					return nil, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING", param)
+					return nil, fmt.Errorf("Error parameter %s set,correct type is %s", pk, reflect.TypeOf(pv))
 				}
-			}else {
-				return nil, fmt.Errorf("Error set %s, must set DEBUG,INFO,ERROR,WARNING string", param)
+			}
+		}
+		credentials[pk] = pv
+	}
+	return credentials, nil
+}
+
+func (sb *APMSserviceBroker)GetService(serviceId string) (config.Service, error) {
+	for _,s := range sb.config.Services {
+		if strings.EqualFold(s.Id, serviceId) {
+			return s, nil
+		}
+	}
+	return *new(config.Service), nil
+}
+
+func (sb *APMSserviceBroker)GetPlan(serviceId, planId string) (config.Plan, error) {
+	for _,s := range sb.config.Services {
+		if strings.EqualFold(s.Id, serviceId) {
+			for _,p := range s.Plans {
+				if strings.EqualFold(p.Id, planId){
+					return p, nil
+				}
 			}
 		}
 	}
-	return credentials, nil
+	return *new(config.Plan), nil
+}
+
+func servicePlans(plans []config.Plan) []brokerapi.ServicePlan {
+	servicePlans := make([]brokerapi.ServicePlan, len(plans))
+	for _,servicePlan := range servicePlans {
+		servicePlans = append(servicePlans, brokerapi.ServicePlan{
+			ID:		servicePlan.ID,
+			Name:		servicePlan.Name,
+			Description:	servicePlan.Description,
+			Free:		servicePlan.Free,
+			Bindable:	servicePlan.Bindable,
+			Metadata:	&brokerapi.ServicePlanMetadata{
+				DisplayName:	servicePlan.Metadata.DisplayName,
+				Bullets: 	servicePlan.Metadata.Bullets,
+			},
+			Schemas:	servicePlan.Schemas,
+		})
+	}
+	return servicePlans
 }

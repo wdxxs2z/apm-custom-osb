@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/wdxxs2z/skywalking-osb/config"
+	"github.com/wdxxs2z/apm-custom-osb/config"
 	"errors"
 	"os"
 	"io/ioutil"
