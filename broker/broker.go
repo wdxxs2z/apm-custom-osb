@@ -17,6 +17,7 @@ import (
 
 	"github.com/wdxxs2z/apm-custom-osb/config"
 	"github.com/wdxxs2z/apm-custom-osb/db"
+	//"strconv"
 )
 
 type ProvisionParameters map[string]string
@@ -67,7 +68,7 @@ func (sb *APMSserviceBroker)Services(context context.Context) ([]brokerapi.Servi
 
 	apmServices := sb.config.Services
 
-	services := make([]brokerapi.Service,len(apmServices))
+	var services []brokerapi.Service
 
 	for _,apmService := range apmServices {
 
@@ -98,7 +99,7 @@ func (sb *APMSserviceBroker)Provision(context context.Context, instanceID string
 		"instance_id":        	instanceID,
 	})
 	service,_ := sb.GetService(details.ServiceID)
-	if service.Name != "" {
+	if service.Name == "" {
 		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
 	}
 	exist, err := db.Exist(service.Name + "/" +instanceID + "/details", sb.logger, sb.config)
@@ -124,7 +125,7 @@ func (sb *APMSserviceBroker)Deprovision(context context.Context, instanceID stri
 		"instance_id":        	instanceID,
 	})
 	service,_ := sb.GetService(details.ServiceID)
-	if service.Name != "" {
+	if service.Name == "" {
 		return brokerapi.DeprovisionServiceSpec{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
 	}
 	exist, existErr := db.Exist(service.Name + "/" + instanceID + "/details", sb.logger, sb.config)
@@ -150,7 +151,7 @@ func (sb *APMSserviceBroker)Bind(context context.Context, instanceID, bindingID 
 	credentials := make(map[string]interface{})
 
 	service,_ := sb.GetService(details.ServiceID)
-	if service.Name != "" {
+	if service.Name == "" {
 		return brokerapi.Binding{}, fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
 	}
 	instanceExist, instanceExistErr := db.Exist(service.Name + "/" + instanceID + "/details", sb.logger, sb.config)
@@ -223,7 +224,7 @@ func (sb *APMSserviceBroker)Unbind(context context.Context, instanceID, bindingI
 		"instance_id":        	instanceID,
 	})
 	service,_ := sb.GetService(details.ServiceID)
-	if service.Name != "" {
+	if service.Name == "" {
 		return fmt.Errorf("service (%s) not found in catalog", details.ServiceID)
 	}
 	exist, existErr := db.Exist(service.Name + "/" + instanceID + "/bindings/" + bindingID + "/credentials", sb.logger, sb.config)
@@ -292,9 +293,11 @@ func (sb *APMSserviceBroker)ValidateParameter(serviceId string, planId string, p
 	for pk,pv := range plan.Parameters {
 		for param, value := range parameters {
 			if strings.EqualFold(pk, param) {
-				if (reflect.TypeOf(pv) == reflect.TypeOf(value)) {
+				if reflect.TypeOf(value).Kind().String() == "float64" {
 					credentials[pk] = value
-				}else {
+				} else if (reflect.TypeOf(pv) == reflect.TypeOf(value)) {
+					credentials[pk] = value
+				} else {
 					return nil, fmt.Errorf("Error parameter %s set,correct type is %s", pk, reflect.TypeOf(pv))
 				}
 			}
@@ -327,19 +330,17 @@ func (sb *APMSserviceBroker)GetPlan(serviceId, planId string) (config.Plan, erro
 }
 
 func servicePlans(plans []config.Plan) []brokerapi.ServicePlan {
-	servicePlans := make([]brokerapi.ServicePlan, len(plans))
-	for _,servicePlan := range servicePlans {
+	servicePlans := make([]brokerapi.ServicePlan, len(plans)-1)
+	for _,servicePlan := range plans {
 		servicePlans = append(servicePlans, brokerapi.ServicePlan{
-			ID:		servicePlan.ID,
+			ID:		servicePlan.Id,
 			Name:		servicePlan.Name,
 			Description:	servicePlan.Description,
 			Free:		servicePlan.Free,
 			Bindable:	servicePlan.Bindable,
 			Metadata:	&brokerapi.ServicePlanMetadata{
-				DisplayName:	servicePlan.Metadata.DisplayName,
 				Bullets: 	servicePlan.Metadata.Bullets,
 			},
-			Schemas:	servicePlan.Schemas,
 		})
 	}
 	return servicePlans

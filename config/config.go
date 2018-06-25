@@ -49,6 +49,7 @@ type Plan struct {
 }
 
 type PlanMetadata struct {
+
 	Costs    		[]Cost			`yaml:"costs"`
 	Bullets  		[]string		`yaml:"bullets"`
 }
